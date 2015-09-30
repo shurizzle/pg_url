@@ -1,4 +1,4 @@
-\echo Use "CREATE EXTENSION url_encode" to load this file. \quit
+\echo Use "CREATE EXTENSION url" to load this file. \quit
 
 CREATE OR REPLACE FUNCTION url_encode(TEXT)
 RETURNS TEXT
