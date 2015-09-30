@@ -1,0 +1,4 @@
+# url extension
+comment = 'PostgreSQL library to handle URLs'
+default_version = '1.0'
+relocatable = true
