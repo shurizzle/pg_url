@@ -1,2 +1,2 @@
 # pg_url
-PostgreSQL library to handle URLs
+PostgreSQL 9.4 library to handle URLs
