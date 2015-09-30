@@ -33,6 +33,41 @@ FROM UNNEST($1.entries);
 $$
 LANGUAGE sql;
 
+CREATE OR REPLACE FUNCTION get_values(qskv, TEXT)
+RETURNS TEXT[]
+AS $$
+SELECT ARRAY(
+	SELECT value
+	FROM UNNEST($1)
+	WHERE key = $2
+	);
+$$
+LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION get_value(qskv, TEXT)
+RETURNS TEXT
+AS $$
+SELECT (
+	SELECT value
+	FROM UNNEST($1)
+	WHERE key = $2
+	LIMIT 1
+	);
+$$
+LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE OPERATOR -> (
+	PROCEDURE = get_value,
+	LEFTARG = qskv,
+	RIGHTARG = TEXT
+);
+
+CREATE OPERATOR ->> (
+	PROCEDURE = get_values,
+	LEFTARG = qskv,
+	RIGHTARG = TEXT
+);
+
 CREATE OR REPLACE FUNCTION string_to_kventry(TEXT)
 RETURNS kventry
 AS $$
