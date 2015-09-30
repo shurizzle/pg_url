@@ -25,28 +25,6 @@ CREATE TYPE qskv AS (
 	entries kventry[]
 );
 
-CREATE OR REPLACE FUNCTION qs_to_qskv(TEXT)
-RETURNS qskv
-AS $$
-DECLARE
-	p INTEGER;
-	kv TEXT;
-	res kventry[];
-BEGIN
-	FOREACH kv IN ARRAY string_to_array($1, '&')
-	LOOP
-		p := strpos(kv, '=');
-		res := res ||
-		CASE WHEN p < 1 THEN ROW(kv, NULL)::kventry
-		                ELSE ROW(substr(kv, 1, p - 1), NULLIF(url_decode(substr(kv, p + 1)), ''))::kventry
-		END;
-	END LOOP;
-
-	RETURN ROW(res)::qskv;
-END;
-$$
-LANGUAGE plpgsql IMMUTABLE STRICT;
-
 CREATE OR REPLACE FUNCTION UNNEST(qskv)
 RETURNS TABLE (key TEXT, value TEXT)
 AS $$
@@ -55,23 +33,65 @@ FROM UNNEST($1.entries);
 $$
 LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION qskv_to_qs(qskv)
+CREATE OR REPLACE FUNCTION string_to_kventry(TEXT)
+RETURNS kventry
+AS $$
+DECLARE
+	p INTEGER := strpos($1, '=');
+BEGIN
+	RETURN CASE WHEN p < 1 THEN ROW($1, NULL)::kventry
+	            ELSE            ROW(substr($1, 1, p - 1), NULLIF(url_decode(substr($1, p + 1)), ''))::kventry
+	       END;
+END;
+$$
+LANGUAGE plpgsql IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION kventry(TEXT)
+RETURNS kventry
+AS $$
+SELECT string_to_kventry($1);
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION kventry_to_string(kventry)
 RETURNS TEXT
 AS $$
-SELECT string_agg(CASE WHEN NULLIF(value,'') IS NULL THEN key ELSE key || '=' || url_encode(value) END, '&')
-FROM UNNEST($1);
+SELECT CASE WHEN NULLIF($1.value,'') IS NULL THEN $1.key
+            ELSE                                  $1.key || '=' || url_encode($1.value)
+       END;
+$$
+LANGUAGE sql;
+
+CREATE CAST (TEXT AS kventry) WITH FUNCTION string_to_kventry(TEXT);
+CREATE CAST (kventry AS TEXT) WITH FUNCTION kventry_to_string(kventry);
+
+CREATE OR REPLACE FUNCTION string_to_qskv(TEXT)
+RETURNS qskv
+AS $$
+SELECT ROW((
+	SELECT array_agg(v::kventry)
+	FROM UNNEST(string_to_array($1, '&')) t(v)
+	))::qskv;
+$$
+LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION qskv_to_string(qskv)
+RETURNS TEXT
+AS $$
+SELECT string_agg(kventry_to_string(t),'&')
+FROM UNNEST($1) t;
 $$
 LANGUAGE sql IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION qskv(TEXT)
 RETURNS qskv
 AS $$
-SELECT qs_to_qskv($1);
+SELECT string_to_qskv($1);
 $$
 LANGUAGE sql IMMUTABLE STRICT;
 
-CREATE CAST (TEXT AS qskv) WITH FUNCTION qs_to_qskv(TEXT);
-CREATE CAST (qskv AS TEXT) WITH FUNCTION qskv_to_qs(qskv);
+CREATE CAST (TEXT AS qskv) WITH FUNCTION string_to_qskv(TEXT);
+CREATE CAST (qskv AS TEXT) WITH FUNCTION qskv_to_string(qskv);
 
 CREATE TYPE url AS (
 	scheme TEXT,
@@ -83,13 +103,30 @@ CREATE TYPE url AS (
 	fragment TEXT
 );
 
-CREATE OR REPLACE FUNCTION url(TEXT)
+CREATE OR REPLACE FUNCTION string_to_url(TEXT)
 RETURNS url
 AS $$
 DECLARE
-	p TEXT[] := regexp_matches($1, E'^(?:([^:/?#]+):)?(?://(?:((?:%\h\h|[!$&-.0-;=A-Z_a-z~])*)@)?([^/?#]+?)(?::([0-9]+))?)?([^?#]*)(?:\\?([^#]*))?(?:#(.*))?', 'i');
+	p TEXT[] := regexp_matches($1, E'^(?:([^:/?#]+)://)?(?:(?:((?:%\h\h|[!$&-.0-;=A-Z_a-z~])*)@)?([^/?#]+?)(?::([0-9]+))?)?([^?#]*)(?:\\?([^#]*))?(?:#(.*))?$', 'i');
 BEGIN
 	RETURN ROW(p[1], p[2], p[3], NULLIF(p[4],'')::INTEGER, p[5], p[6], p[7])::url;
 END;
 $$
 LANGUAGE plpgsql IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION url(TEXT)
+RETURNS url
+AS $$
+SELECT string_to_url($1);
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION url_to_string(url)
+RETURNS TEXT
+AS $$
+SELECT NULLIF(CONCAT($1.scheme || '://', $1.authority || '@', $1.domain, ':' || $1.port, $1.path, '?' || qskv_to_string($1.querystring), '#' || $1.fragment),'');
+$$
+LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE CAST (TEXT AS url) WITH FUNCTION string_to_url(TEXT);
+CREATE CAST (url AS TEXT) WITH FUNCTION url_to_string(url);
